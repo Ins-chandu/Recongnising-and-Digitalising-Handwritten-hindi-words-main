@@ -4,6 +4,7 @@ from scipy import ndimage
 import math
 import argparse
 import os
+import glob
 import tensorflow as tf
 import all_functions_used as helpers
 
@@ -155,7 +156,7 @@ def predict(imagepath, output_dir):
     col_sum = np.sum(dilated, axis=0)
     thresh = 0.08 * dilated.shape[0]
 
-    for i in range(1, dilated.shape[1]):
+    for i in range(1, dilated.shape[1] - 1):
         if col_sum[i - 1] <= thresh and col_sum[i] > thresh and col_sum[i + 1] > thresh:
             start_char.append(i)
         elif (
@@ -165,23 +166,33 @@ def predict(imagepath, output_dir):
         ):
             end_char.append(i)
 
-    start_char.append(end_char[-1])
+    if end_char:
+        start_char.append(end_char[-1])
+
     character = []
 
+    seg_idx = 1
     for i in range(1, len(start_char)):
         roi = rotated_img[:, start_char[i - 1] : start_char[i]]
-        h = roi.shape[1]
-        w = roi.shape[0]
-        roi = helpers.extractroi(roi)
+        roi_h = roi.shape[0]
+        roi_w = roi.shape[1]
+
+        try:
+            roi = helpers.extractroi(roi)
+        except Exception:
+            continue
+
         roi = cv2.resize(roi, (180, 180))
-        if helpers.check(roi) and h >= 30 and w >= 30:
+
+        if roi_h > 0 and roi_w > 0:
             character.append(roi)
 
             cv2.imshow("CHARACTER_SEGMENTED", roi)
             cv2.waitKey(1000)
 
-            char_img_path = os.path.join(output_dir, f"char_{i}.png")
+            char_img_path = os.path.join(output_dir, f"char_{seg_idx}.png")
             cv2.imwrite(char_img_path, roi)
+            seg_idx += 1
 
     ls = []
     for char in character:
@@ -191,25 +202,40 @@ def predict(imagepath, output_dir):
     return ls
 
 
-def test():
-    image_paths = ["./SampleImages/kamal2.jpeg"]
-    output_dir = "./segmented_characters/"
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Segment and recognize characters from a handwritten Hindi word image."
+    )
+    parser.add_argument(
+        "image_path",
+        help="Path to input image (example: ./SampleImages/sharbath.jpeg)",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default="./segmented_characters/",
+        help="Directory where segmented intermediate and character images are saved.",
+    )
+    return parser.parse_args()
+
+
+def run_single_image(image_path, output_dir):
+    if not os.path.isfile(image_path):
+        raise FileNotFoundError(f"Input image not found: {image_path}")
+
     os.makedirs(output_dir, exist_ok=True)
 
-    correct_answers = [""]
-    score = 0
-    multiplication_factor = 2
+    # Remove stale segmented character files from previous runs.
+    for file_path in glob.glob(os.path.join(output_dir, "char_*.png")):
+        try:
+            os.remove(file_path)
+        except OSError:
+            pass
 
-    for i, image_path in enumerate(image_paths):
-        image = cv2.imread(image_path)
-        answer = predict(image_path, output_dir)
-        print("".join(answer))
-        if correct_answers[i] == answer:
-            score += len(answer) * multiplication_factor
-
-        print("Segmented characters saved in", output_dir)
-        print("The final score of the participant is", score)
+    answer = predict(image_path, output_dir)
+    print("".join(answer))
+    print("Segmented characters saved in", output_dir)
 
 
 if __name__ == "__main__":
-    test()
+    args = parse_args()
+    run_single_image(args.image_path, args.output_dir)
